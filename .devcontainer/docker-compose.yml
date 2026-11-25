@@ -1,0 +1,22 @@
+# Adds the dev container `workspace` service on top of the root docker-compose.yml.
+# Only `db` and `workspace` are started (see `runServices` in devcontainer.json).
+services:
+  workspace:
+    image: mcr.microsoft.com/devcontainers/python:3.13
+    command: sleep infinity
+    volumes:
+      # Paths resolve relative to the first compose file (the repository root).
+      - .:/workspace:cached
+      # Keep Linux-built dependencies out of the host checkout.
+      - backend-venv:/workspace/backend/.venv
+      - frontend-node-modules:/workspace/frontend/node_modules
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app
+      TEST_DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app_test
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  backend-venv:
+  frontend-node-modules:

@@ -1,0 +1,25 @@
+{
+  "name": "adrobot",
+  "dockerComposeFile": ["../docker-compose.yml", "docker-compose.yml"],
+  "service": "workspace",
+  "runServices": ["db", "workspace"],
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "24" },
+    "ghcr.io/va-h/devcontainers-features/uv:1": {}
+  },
+  "forwardPorts": [8000, 5173],
+  "postCreateCommand": "sudo chown -R vscode /workspace/backend/.venv /workspace/frontend/node_modules && corepack enable --install-directory ~/.local/bin && make install",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker",
+        "oxc.oxc-vscode",
+        "bradlc.vscode-tailwindcss"
+      ]
+    }
+  }
+}

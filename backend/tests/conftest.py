@@ -1,0 +1,56 @@
+import os
+from collections.abc import AsyncIterator
+
+import pytest
+from dotenv import load_dotenv
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+
+from app.db.session import get_session
+from app.main import create_app
+from app.models import Base
+
+load_dotenv()
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL", "postgresql+asyncpg://app:app@localhost:5432/app_test"
+)
+
+
+@pytest.fixture(scope="session")
+async def engine() -> AsyncIterator[AsyncEngine]:
+    engine = create_async_engine(TEST_DATABASE_URL)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
+    """A session bound to an outer transaction that is rolled back after the test.
+
+    Commits inside the code under test become savepoints, so nothing persists.
+    """
+    async with engine.connect() as conn:
+        transaction = await conn.begin()
+        session = AsyncSession(
+            bind=conn, expire_on_commit=False, join_transaction_mode="create_savepoint"
+        )
+        try:
+            yield session
+        finally:
+            await session.close()
+            await transaction.rollback()
+
+
+@pytest.fixture
+async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    app = create_app()
+
+    async def override_get_session() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
