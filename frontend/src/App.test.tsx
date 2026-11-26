@@ -1,20 +1,10 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '@/App'
+import { renderWithProviders } from '@/test/render'
 
-function renderAt(path: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <App />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  )
-}
+const renderAt = (path: string) => renderWithProviders(<App />, { path })
 
 describe('App routing', () => {
   afterEach(() => {
@@ -24,13 +14,23 @@ describe('App routing', () => {
   it('renders the campaign list at /', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(Response.json({ status: 'ok', database: 'ok' })),
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url.endsWith('/health')
+            ? Response.json({ status: 'ok', database: 'ok' })
+            : Response.json([{ id: 355, name: 'Spring promo', alias: 'abc', state: 'active' }]),
+        ),
+      ),
     )
 
     renderAt('/')
 
     expect(screen.getByRole('heading', { name: 'Campaigns' })).toBeInTheDocument()
     expect(await screen.findByText('API: online')).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: 'Spring promo' })).toHaveAttribute(
+      'href',
+      '/campaigns/355',
+    )
   })
 
   it('renders the editor with the campaign id from the path', () => {

@@ -9,7 +9,70 @@ Admin API.
 - **Campaign editor:** adds and removes offers in a campaign's streams, keeps offer weights
   correct (with pinning), and pushes changes back to Keitaro.
 
-> **Status:** project scaffold. The features above are in progress.
+> **Status:** the campaign creator and the campaign editor are implemented.
+
+## API
+
+Interactive docs: <http://localhost:8000/docs>.
+
+| Method | Path                     | Purpose                                                        |
+|--------|--------------------------|----------------------------------------------------------------|
+| GET    | `/health`                | Liveness and database check                                    |
+| GET    | `/api/v1/reference`      | Domains, groups, traffic sources, countries, creator defaults |
+| GET    | `/api/v1/offers?q=`      | Search active offers by id prefix or name                     |
+| POST   | `/api/v1/offers/refresh` | Reload the offer catalog from Keitaro                          |
+| GET    | `/api/v1/campaigns`      | List campaigns from Keitaro                                    |
+| POST   | `/api/v1/campaigns`      | Create a campaign with its two streams                         |
+| GET    | `/api/v1/campaigns/{id}` | Editor snapshot (fetched from Keitaro on first open)           |
+| POST   | `/api/v1/campaigns/{id}/fetch` | Re-read streams from Keitaro, discarding unpublished changes |
+| POST   | `/api/v1/streams/{id}/offers` | Add an offer (`{"offer_id": …}`)                          |
+| POST   | `/api/v1/streams/{id}/offers/{offer_id}/remove` | Remove an offer (kept as `removed`)    |
+| POST   | `/api/v1/streams/{id}/offers/{offer_id}/bring-back` | Return a removed offer             |
+| PUT    | `/api/v1/streams/{id}/offers/{offer_id}/share` | Set and pin a share (`{"share": …}`)    |
+| POST   | `/api/v1/streams/{id}/offers/{offer_id}/unpin` | Unpin a share                           |
+| POST   | `/api/v1/streams/{id}/push` | Publish the stream's draft to Keitaro                         |
+| POST   | `/api/v1/streams/{id}/cancel` | Revert all unpublished changes of the stream                |
+
+Campaign and stream ids are Keitaro ids. Every stream edit returns the recalculated stream.
+Errors use one shape: `{"error": {"code": "...", "message": "..."}}`.
+
+### How the editor works
+
+The editor keeps a **local snapshot** of a campaign's streams. Each offer row stores the
+editable draft (`state`, `share`, `pinned`) next to the state last published to Keitaro.
+A stream is **dirty** (yellow in the UI) when any draft differs from what was published.
+Nothing reaches Keitaro until **Push**.
+
+- **Fetch streams from KT** — Keitaro's offers become active with Keitaro's shares; offers
+  known locally but missing in Keitaro are archived as `removed`; published pins are kept;
+  unpublished changes are discarded (the UI asks for confirmation first). Streams without
+  offers (such as the Google redirect) are shown read-only.
+- **Add / Remove / Bring back / Pin** — change the draft and recalculate weights.
+  An offer already in the stream as `removed` is brought back instead of added again.
+- **Push** — sends the active offers with their shares (`PUT /streams/{id}` with `offers`).
+- **Cancel** — reverts the stream to the last published state; offers added since are dropped.
+
+**Weights** are integer percentages: pinned shares never change, and the rest
+(`100 − Σ pinned`) is split evenly among unpinned active offers with the largest remainder
+method (3 offers → 34/33/33; one pinned at 25% + two others → 25/38/37). Pins above 100%
+are rejected; Push is blocked while active shares do not add up to 100%. The rules live in
+`backend/app/services/weights.py` and `stream_rules.py` and are unit-tested.
+
+### How campaign creation works
+
+1. The request is validated: known ISO country codes, an existing **active** offer, and
+   existing domain / group / traffic source ids.
+2. The campaign is created in Keitaro, then two streams:
+   - **Geo redirect** (position 1): a `country` filter with the selected countries,
+     HTTP redirect to `GOOGLE_URL`;
+   - **Offers** (position 2): no filters, the selected offer with a 100% share.
+3. If any step after the campaign fails, the campaign is deleted in Keitaro (its streams go
+   with it), and the API returns `502` with Keitaro's error message.
+4. The campaign is stored locally and the UI opens its editor.
+
+Offers are mirrored into the local database (refreshed when older than
+`OFFERS_CACHE_TTL_MINUTES`, or on demand), and reference lists are cached in memory, so the
+form does not hit Keitaro on every keystroke.
 
 ## Tech stack
 

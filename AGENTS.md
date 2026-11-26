@@ -98,9 +98,9 @@ Submission: a GitHub link with a clear README covering migrations and running th
 - **Single client:** all Keitaro calls go through one async client module
   (`app/integrations/keitaro/`) behind an interface. Services never use `httpx` directly.
 - **Tests never call the real emulator.** Use a fake client or `respx`.
-- **Manual testing against the emulator:** test campaigns must be named with the prefix
-  `dev-test-` and deleted after verification. Do not modify campaigns you did not create
-  (e.g. `test_kashapov_campaign1`).
+- **Manual testing against the emulator:** name test campaigns `test_kashapov_campaign<N>`,
+  continuing the numbering of the campaigns that already exist (e.g. after
+  `test_kashapov_campaign2` comes `test_kashapov_campaign3`). Never reuse a number.
 
 ## Language policy
 

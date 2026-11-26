@@ -6,9 +6,13 @@ from dotenv import load_dotenv
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
+from app.api.deps import get_keitaro_client, get_reference_cache
+from app.core.config import Settings, get_settings
 from app.db.session import get_session
 from app.main import create_app
 from app.models import Base
+from app.services.reference import ReferenceCache
+from tests.fakes import FakeKeitaroClient
 
 load_dotenv()
 TEST_DATABASE_URL = os.environ.get(
@@ -45,12 +49,37 @@ async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 
 
 @pytest.fixture
-async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+def keitaro() -> FakeKeitaroClient:
+    return FakeKeitaroClient()
+
+
+@pytest.fixture
+def settings() -> Settings:
+    return Settings(
+        _env_file=None,
+        google_url="https://google.com",
+        default_domain_id=1813,
+        default_group_id=None,
+        default_traffic_source_id=None,
+        offers_cache_ttl_minutes=10,
+    )
+
+
+@pytest.fixture
+async def client(
+    session: AsyncSession, keitaro: FakeKeitaroClient, settings: Settings
+) -> AsyncIterator[AsyncClient]:
     app = create_app()
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
+    cache = ReferenceCache(ttl_seconds=600)
     app.dependency_overrides[get_session] = override_get_session
+    app.dependency_overrides[get_keitaro_client] = lambda: keitaro
+    app.dependency_overrides[get_reference_cache] = lambda: cache
+    app.dependency_overrides[get_settings] = lambda: settings
+
+    # The lifespan (real Keitaro client, startup sync) is not run by ASGITransport.
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
