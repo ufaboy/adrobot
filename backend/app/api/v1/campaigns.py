@@ -1,4 +1,6 @@
-from fastapi import APIRouter, status
+from typing import Annotated
+
+from fastapi import APIRouter, Header, status
 
 from app.api.deps import CampaignServiceDep, EditorServiceDep
 from app.schemas.campaigns import CampaignCreate, CampaignCreated
@@ -14,9 +16,17 @@ async def list_campaigns(editor: EditorServiceDep) -> list[CampaignSummary]:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_campaign(data: CampaignCreate, campaigns: CampaignServiceDep) -> CampaignCreated:
-    """Create a Keitaro campaign with a geo-redirect stream and an offer stream."""
-    return await campaigns.create(data)
+async def create_campaign(
+    data: CampaignCreate,
+    campaigns: CampaignServiceDep,
+    idempotency_key: Annotated[str | None, Header(min_length=1, max_length=200)] = None,
+) -> CampaignCreated:
+    """Create a Keitaro campaign with a geo-redirect stream and an offer stream.
+
+    Send an `Idempotency-Key` header to make retries safe: a repeated key returns the
+    first result (409 while it is still running, 422 if reused with a different body).
+    """
+    return await campaigns.create(data, idempotency_key)
 
 
 @router.get("/{campaign_id}")

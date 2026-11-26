@@ -6,7 +6,8 @@ interface ShareInputProps {
   offerId: number
   value: number
   disabled?: boolean
-  onCommit: (share: number) => void
+  /** `revert` puts the server's value back, e.g. when the change is rejected. */
+  onCommit: (share: number, revert: () => void) => void
 }
 
 /** Percent input; commits on blur or Enter only when the value actually changed. */
@@ -26,7 +27,7 @@ export function ShareInput({ offerId, value, disabled, onCommit }: ShareInputPro
       setDraft(String(value))
       return
     }
-    if (parsed !== value) onCommit(parsed)
+    if (parsed !== value) onCommit(parsed, () => setDraft(String(value)))
   }
 
   return (

@@ -78,7 +78,8 @@ async def test_first_open_fetches_streams(
 async def test_unknown_campaign_returns_keitaro_error(client: AsyncClient) -> None:
     response = await client.get("/api/v1/campaigns/999999")
 
-    assert response.status_code == 502
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "keitaro_rejected"
     assert "Campaign not found" in response.json()["error"]["message"]
 
 

@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { CountryMultiSelect } from '@/components/CountryMultiSelect'
 import { IdSelect } from '@/components/IdSelect'
 import { OfferCombobox } from '@/components/OfferCombobox'
+import { SlowHint } from '@/components/SlowHint'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
@@ -162,10 +163,11 @@ export function CampaignCreateForm({
           </Alert>
         )}
 
-        <div>
-          <Button type="submit" disabled={isSubmitting}>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+          <Button type="submit" size="lg" className="w-full sm:w-auto" loading={isSubmitting}>
             {isSubmitting ? 'Creating…' : 'Create campaign'}
           </Button>
+          <SlowHint pending={isSubmitting} />
         </div>
       </FieldGroup>
     </form>

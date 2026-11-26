@@ -3,6 +3,8 @@ import { useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router'
 
 import { StreamCard } from '@/components/editor/StreamCard'
+import { LoadError } from '@/components/LoadError'
+import { SlowHint } from '@/components/SlowHint'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -14,6 +16,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useCampaignEditor, useFetchCampaign } from '@/hooks/use-campaign-editor'
+import { useSingleFlight } from '@/hooks/use-single-flight'
 import type { CampaignCreated } from '@/lib/api'
 
 export function CampaignEditorPage() {
@@ -21,6 +24,7 @@ export function CampaignEditorPage() {
   const created = (useLocation().state as { created?: CampaignCreated } | null)?.created
   const campaign = useCampaignEditor(id)
   const fetchFromKeitaro = useFetchCampaign(id)
+  const fetchOnce = useSingleFlight(fetchFromKeitaro)
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   if (!Number.isInteger(id) || id <= 0) {
@@ -31,7 +35,7 @@ export function CampaignEditorPage() {
 
   const fetchStreams = () => {
     setConfirmOpen(false)
-    fetchFromKeitaro.mutate()
+    fetchOnce()
   }
 
   return (
@@ -52,14 +56,18 @@ export function CampaignEditorPage() {
             </p>
           )}
         </div>
-        <Button
-          variant="outline"
-          disabled={!campaign.data || fetchFromKeitaro.isPending}
-          onClick={() => (dirtyStreams.length ? setConfirmOpen(true) : fetchStreams())}
-        >
-          <RefreshCwIcon className={fetchFromKeitaro.isPending ? 'animate-spin' : ''} />
-          Fetch streams from KT
-        </Button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row-reverse sm:items-center sm:gap-3">
+          <Button
+            variant="outline"
+            className="w-full sm:w-auto"
+            disabled={!campaign.data || fetchFromKeitaro.isPending}
+            onClick={() => (dirtyStreams.length ? setConfirmOpen(true) : fetchStreams())}
+          >
+            <RefreshCwIcon className={fetchFromKeitaro.isPending ? 'animate-spin' : ''} />
+            {fetchFromKeitaro.isPending ? 'Fetching…' : 'Fetch streams from KT'}
+          </Button>
+          <SlowHint pending={fetchFromKeitaro.isPending} />
+        </div>
       </div>
 
       {created && (
@@ -71,12 +79,19 @@ export function CampaignEditorPage() {
         </Alert>
       )}
 
-      {(campaign.error ?? fetchFromKeitaro.error) && (
+      {campaign.isError && (
+        <LoadError
+          title="Could not load the campaign"
+          error={campaign.error}
+          onRetry={() => void campaign.refetch()}
+          retrying={campaign.isFetching}
+        />
+      )}
+
+      {fetchFromKeitaro.isError && (
         <Alert variant="destructive">
-          <AlertTitle>Keitaro request failed</AlertTitle>
-          <AlertDescription>
-            {(campaign.error ?? fetchFromKeitaro.error)?.message}
-          </AlertDescription>
+          <AlertTitle>Fetch from Keitaro failed</AlertTitle>
+          <AlertDescription>{fetchFromKeitaro.error.message}</AlertDescription>
         </Alert>
       )}
 

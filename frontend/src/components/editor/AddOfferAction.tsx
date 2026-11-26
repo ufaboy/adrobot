@@ -7,6 +7,9 @@ interface AddOfferActionProps {
   offer: Offer | null
   streamOffers: StreamOffer[]
   disabled?: boolean
+  /** The add / bring-back request for the picked offer is running. */
+  loading?: boolean
+  className?: string
   onAdd: (offerId: number) => void
   onBringBack: (offerId: number) => void
 }
@@ -19,6 +22,8 @@ export function AddOfferAction({
   offer,
   streamOffers,
   disabled,
+  loading,
+  className,
   onAdd,
   onBringBack,
 }: AddOfferActionProps) {
@@ -26,7 +31,13 @@ export function AddOfferAction({
 
   if (offer && existing?.state === 'removed') {
     return (
-      <Button variant="secondary" disabled={disabled} onClick={() => onBringBack(offer.id)}>
+      <Button
+        variant="secondary"
+        className={className}
+        disabled={disabled}
+        loading={loading}
+        onClick={() => onBringBack(offer.id)}
+      >
         <Undo2Icon />
         Bring back
       </Button>
@@ -35,14 +46,19 @@ export function AddOfferAction({
 
   if (existing?.state === 'active') {
     return (
-      <Button variant="outline" disabled>
+      <Button variant="outline" className={className} disabled>
         Already in stream
       </Button>
     )
   }
 
   return (
-    <Button disabled={disabled || !offer} onClick={() => offer && onAdd(offer.id)}>
+    <Button
+      className={className}
+      disabled={disabled || !offer}
+      loading={loading}
+      onClick={() => offer && onAdd(offer.id)}
+    >
       <PlusIcon />
       Add offer
     </Button>

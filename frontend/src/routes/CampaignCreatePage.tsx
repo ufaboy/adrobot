@@ -1,13 +1,15 @@
 import { useNavigate } from 'react-router'
 
 import { CampaignCreateForm } from '@/components/CampaignCreateForm'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { LoadError } from '@/components/LoadError'
 import { useCreateCampaign, useReference } from '@/hooks/use-campaign-creator'
+import { useSingleFlight } from '@/hooks/use-single-flight'
 
 export function CampaignCreatePage() {
   const navigate = useNavigate()
   const reference = useReference()
   const create = useCreateCampaign()
+  const createOnce = useSingleFlight(create)
 
   return (
     <section className="space-y-6">
@@ -21,10 +23,12 @@ export function CampaignCreatePage() {
       {reference.isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
 
       {reference.isError && (
-        <Alert variant="destructive">
-          <AlertTitle>Could not load Keitaro data</AlertTitle>
-          <AlertDescription>{reference.error.message}</AlertDescription>
-        </Alert>
+        <LoadError
+          title="Could not load Keitaro data"
+          error={reference.error}
+          onRetry={() => void reference.refetch()}
+          retrying={reference.isFetching}
+        />
       )}
 
       {reference.isSuccess && (
@@ -33,7 +37,7 @@ export function CampaignCreatePage() {
           isSubmitting={create.isPending}
           submitError={create.error?.message ?? null}
           onSubmit={(data) =>
-            create.mutate(data, {
+            createOnce(data, {
               onSuccess: (campaign) =>
                 navigate(`/campaigns/${campaign.id}`, { state: { created: campaign } }),
             })

@@ -4,12 +4,13 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
 
 import { App } from '@/App'
+import { shouldRetryQuery } from '@/lib/query-retry'
 
 import './index.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { refetchOnWindowFocus: false, retry: 1 },
+    queries: { refetchOnWindowFocus: false, retry: shouldRetryQuery },
   },
 })
 

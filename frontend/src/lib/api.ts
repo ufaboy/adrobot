@@ -27,11 +27,39 @@ export class ApiError extends Error {
   }
 }
 
+/** Reads give up after this long; the backend's worst case for a read is ~26 s. */
+export const READ_TIMEOUT_MS = 30_000
+
+/** The backend could not be reached at all (no HTTP response). Safe to retry. */
+export class NetworkError extends Error {
+  constructor(message = 'Cannot reach the server. Check your connection and try again.') {
+    super(message)
+    this.name = 'NetworkError'
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  })
+  const method = init?.method ?? 'GET'
+  // Only reads time out. Aborting a change would leave its outcome unknown, while the
+  // backend still finishes it; changes are bounded by the backend's Keitaro timeouts.
+  const signal = method === 'GET' ? AbortSignal.timeout(READ_TIMEOUT_MS) : undefined
+
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      signal,
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...init?.headers },
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new ApiError(0, {
+        code: 'timeout',
+        message: `The server did not respond within ${READ_TIMEOUT_MS / 1000} s. Try again.`,
+      })
+    }
+    throw new NetworkError()
+  }
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as ApiErrorBody | null
@@ -143,8 +171,12 @@ export interface CampaignEditor {
 
 // --- Endpoints --------------------------------------------------------------------
 
-const post = <T>(path: string, body?: unknown) =>
-  request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) })
+const post = <T>(path: string, body?: unknown, headers?: HeadersInit) =>
+  request<T>(path, {
+    method: 'POST',
+    body: body === undefined ? undefined : JSON.stringify(body),
+    headers,
+  })
 
 const streamPath = (streamId: number, offerId?: number) =>
   `/api/v1/streams/${streamId}${offerId === undefined ? '' : `/offers/${offerId}`}`
@@ -159,8 +191,9 @@ export const api = {
 
   refreshOffers: () => request<{ count: number }>('/api/v1/offers/refresh', { method: 'POST' }),
 
-  createCampaign: (data: CampaignCreateRequest) =>
-    post<CampaignCreated>('/api/v1/campaigns', data),
+  /** `idempotencyKey` makes retries safe: the backend replays the first result. */
+  createCampaign: (data: CampaignCreateRequest, idempotencyKey: string) =>
+    post<CampaignCreated>('/api/v1/campaigns', data, { 'Idempotency-Key': idempotencyKey }),
 
   // Editor
   listCampaigns: () => request<CampaignSummary[]>('/api/v1/campaigns'),

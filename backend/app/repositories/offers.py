@@ -18,6 +18,11 @@ class OfferRepository:
     async def last_synced_at(self) -> datetime | None:
         return await self._session.scalar(select(func.max(Offer.synced_at)))
 
+    async def count_available(self) -> int:
+        """Offers present in the last synced catalog (any state but unavailable)."""
+        stmt = select(func.count()).where(Offer.state != OFFER_STATE_UNAVAILABLE)
+        return await self._session.scalar(stmt) or 0
+
     async def replace_catalog(self, offers: Sequence[Offer], synced_at: datetime) -> None:
         """Upsert the given catalog; offers missing from it become unavailable."""
         if offers:

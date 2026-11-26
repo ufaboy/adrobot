@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from app.integrations.keitaro import KeitaroError
+from app.integrations.keitaro import KeitaroError, KeitaroRejectedError
 from app.integrations.keitaro.schemas import (
     CampaignCreatePayload,
     KeitaroCampaign,
@@ -36,6 +36,11 @@ class FakeKeitaroClient:
     )
     # Fail the N-th `create_stream` call (1-based); None means never fail.
     fail_stream_call: int | None = None
+    # Make `create_campaign` raise this error; with `create_applies_before_error`
+    # the campaign is created first, as when Keitaro's response is lost.
+    create_campaign_error: KeitaroError | None = None
+    create_applies_before_error: bool = False
+    list_campaigns_error: KeitaroError | None = None
 
     calls: list[str] = field(default_factory=list)
     created_campaigns: list[CampaignCreatePayload] = field(default_factory=list)
@@ -70,10 +75,12 @@ class FakeKeitaroClient:
 
     async def create_campaign(self, payload: CampaignCreatePayload) -> KeitaroCampaign:
         self.calls.append("create_campaign")
+        if self.create_campaign_error is not None and not self.create_applies_before_error:
+            raise self.create_campaign_error
         self.created_campaigns.append(payload)
         campaign = KeitaroCampaign(
             id=self._id(),
-            alias="abc123",
+            alias=payload.alias or "abc123",
             name=payload.name,
             state="active",
             group_id=payload.group_id,
@@ -81,6 +88,8 @@ class FakeKeitaroClient:
             traffic_source_id=payload.traffic_source_id,
         )
         self.campaigns[campaign.id] = campaign
+        if self.create_campaign_error is not None:
+            raise self.create_campaign_error
         return campaign
 
     async def delete_campaign(self, campaign_id: int) -> None:
@@ -92,7 +101,7 @@ class FakeKeitaroClient:
     async def create_stream(self, payload: StreamCreatePayload) -> KeitaroStream:
         self.calls.append("create_stream")
         if self.fail_stream_call == len(self.created_streams) + 1:
-            raise KeitaroError("stream rejected", 406)
+            raise KeitaroRejectedError("stream rejected", 406)
         self.created_streams.append(payload)
         stream = KeitaroStream(
             id=self._id(),
@@ -143,12 +152,14 @@ class FakeKeitaroClient:
 
     async def list_campaigns(self) -> list[KeitaroCampaign]:
         self.calls.append("list_campaigns")
+        if self.list_campaigns_error is not None:
+            raise self.list_campaigns_error
         return list(self.campaigns.values())
 
     async def get_campaign(self, campaign_id: int) -> KeitaroCampaign:
         self.calls.append("get_campaign")
         if campaign_id not in self.campaigns:
-            raise KeitaroError("Campaign not found", 404)
+            raise KeitaroRejectedError("Campaign not found", 404)
         return self.campaigns[campaign_id]
 
     async def list_streams(self, campaign_id: int) -> list[KeitaroStream]:

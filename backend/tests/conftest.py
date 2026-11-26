@@ -6,11 +6,12 @@ from dotenv import load_dotenv
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
-from app.api.deps import get_keitaro_client, get_reference_cache
+from app.api.deps import get_campaign_idempotency, get_keitaro_client, get_reference_cache
 from app.core.config import Settings, get_settings
 from app.db.session import get_session
 from app.main import create_app
 from app.models import Base
+from app.services.campaigns import CampaignIdempotency
 from app.services.reference import ReferenceCache
 from tests.fakes import FakeKeitaroClient
 
@@ -75,9 +76,11 @@ async def client(
         yield session
 
     cache = ReferenceCache(ttl_seconds=600)
+    idempotency = CampaignIdempotency()
     app.dependency_overrides[get_session] = override_get_session
     app.dependency_overrides[get_keitaro_client] = lambda: keitaro
     app.dependency_overrides[get_reference_cache] = lambda: cache
+    app.dependency_overrides[get_campaign_idempotency] = lambda: idempotency
     app.dependency_overrides[get_settings] = lambda: settings
 
     # The lifespan (real Keitaro client, startup sync) is not run by ASGITransport.

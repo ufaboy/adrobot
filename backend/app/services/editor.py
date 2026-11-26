@@ -156,7 +156,8 @@ class EditorService:
     # --- Helpers ----------------------------------------------------------------------
 
     async def _editable_stream(self, stream_id: int) -> Stream:
-        stream = await self._repo.get_stream(stream_id)
+        """The stream to change, locked until commit (409 if another change holds it)."""
+        stream = await self._repo.get_stream(stream_id, lock=True)
         if stream is None:
             raise NotFoundError(f"Stream {stream_id} is not in the local snapshot; fetch it")
         if not stream.is_offer_stream:

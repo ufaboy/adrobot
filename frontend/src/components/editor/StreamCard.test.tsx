@@ -1,10 +1,10 @@
-import { screen, within } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AddOfferAction } from '@/components/editor/AddOfferAction'
 import { StreamCard } from '@/components/editor/StreamCard'
-import type { Offer, Stream, StreamOffer } from '@/lib/api'
+import { api, type Offer, type Stream, type StreamOffer } from '@/lib/api'
 import { renderWithProviders } from '@/test/render'
 
 function streamOffer(overrides: Partial<StreamOffer> & { offer_id: number }): StreamOffer {
@@ -59,9 +59,13 @@ describe('StreamCard', () => {
     expect(within(card).getByRole('button', { name: /Push to Keitaro/ })).toBeEnabled()
     expect(within(card).getByRole('button', { name: /Cancel/ })).toBeEnabled()
     // A removed offer is greyed out and offers Bring back instead of Remove.
-    const removedRow = within(card).getByText('Offer 2').closest('tr')
+    const removedRow = within(card).getByText('Offer 2').closest('[role="row"]')
     expect(removedRow).toHaveAttribute('data-state', 'removed')
-    expect(within(removedRow as HTMLElement).getByRole('button', { name: /Bring back/ })).toBeVisible()
+    const bringBack = within(removedRow as HTMLElement).getByRole('button', { name: /Bring back/ })
+    expect(bringBack).toBeVisible()
+    // The offer's data is faded, its action is not (it must not look disabled).
+    expect(within(removedRow as HTMLElement).getByText('Offer 2').closest('.opacity-60')).not.toBeNull()
+    expect(bringBack.closest('.opacity-60')).toBeNull()
   })
 
   it('blocks Push and shows the reason when shares do not add up to 100', () => {
@@ -141,5 +145,32 @@ describe('AddOfferAction', () => {
     await userEvent.click(screen.getByRole('button', { name: /Add offer/ }))
 
     expect(onAdd).toHaveBeenCalledWith(9)
+  })
+})
+
+describe('StreamCard double clicks', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('sends one request when Remove is double-clicked', async () => {
+    let finish: (stream: Stream) => void = () => undefined
+    const remove = vi
+      .spyOn(api, 'removeOffer')
+      .mockImplementation(() => new Promise<Stream>((resolve) => (finish = resolve)))
+    renderWithProviders(<StreamCard campaignId={1} stream={makeStream()} />)
+
+    const [removeFirst] = screen.getAllByRole('button', { name: /Remove/ })
+    // Two clicks in the same task, as a real double click arrives: React has not
+    // re-rendered the button as disabled in between.
+    fireEvent.click(removeFirst)
+    fireEvent.click(removeFirst)
+    await vi.waitFor(() => expect(remove).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(remove).toHaveBeenCalledOnce()
+
+    // Once the first request settles, the next click goes through again.
+    finish(makeStream())
+    await vi.waitFor(() => expect(removeFirst).toBeEnabled())
+    await userEvent.click(removeFirst)
+    expect(remove).toHaveBeenCalledTimes(2)
   })
 })

@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.core.errors import register_error_handlers
 from app.db.session import SessionFactory
 from app.integrations.keitaro import HttpKeitaroClient
+from app.services.campaigns import CampaignIdempotency
 from app.services.offers import OfferService
 from app.services.reference import ReferenceCache
 
@@ -28,6 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.keitaro = keitaro
     app.state.reference_cache = ReferenceCache(REFERENCE_CACHE_TTL_SECONDS)
+    app.state.campaign_idempotency = CampaignIdempotency()
 
     # Warm up the offer catalog; the app still starts if Keitaro is unavailable.
     try:

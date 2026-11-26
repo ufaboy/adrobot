@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -10,6 +11,10 @@ from app.repositories.offers import OfferRepository
 
 logger = logging.getLogger(__name__)
 
+# One catalog sync at a time per process. When the cache expires, concurrent searches
+# would otherwise each call Keitaro; with the lock one syncs and the rest reuse it.
+_sync_lock = asyncio.Lock()
+
 
 class OfferService:
     """Keeps the local offer catalog in sync with Keitaro and searches it."""
@@ -21,7 +26,19 @@ class OfferService:
         self._repo = OfferRepository(session)
 
     async def sync(self) -> int:
-        """Reload the whole catalog from Keitaro. Returns the number of offers received."""
+        """Reload the whole catalog from Keitaro. Returns the number of offers received.
+
+        A refresh requested while another sync is running reuses that sync's result
+        (e.g. a second tab, or a repeated click) instead of calling Keitaro again.
+        """
+        requested_at = datetime.now(UTC)
+        async with _sync_lock:
+            last = await self._repo.last_synced_at()
+            if last is not None and last >= requested_at:
+                return await self._repo.count_available()
+            return await self._sync()
+
+    async def _sync(self) -> int:
         remote = await self._keitaro.list_offers()
         offers = [
             Offer(id=o.id, name=o.name, state=o.state, countries=list(o.country)) for o in remote
@@ -33,9 +50,16 @@ class OfferService:
 
     async def ensure_fresh(self) -> None:
         """Sync the catalog if it was never loaded or is older than the TTL."""
+        if await self._is_fresh():
+            return
+        async with _sync_lock:
+            # Another request may have synced while we were waiting for the lock.
+            if not await self._is_fresh():
+                await self._sync()
+
+    async def _is_fresh(self) -> bool:
         last = await self._repo.last_synced_at()
-        if last is None or datetime.now(UTC) - last > self._ttl:
-            await self.sync()
+        return last is not None and datetime.now(UTC) - last <= self._ttl
 
     async def search(self, query: str, *, limit: int = 20) -> Sequence[Offer]:
         await self.ensure_fresh()

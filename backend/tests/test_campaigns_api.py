@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 import pytest
@@ -34,7 +35,11 @@ async def test_creates_campaign_with_two_streams(
     assert len(body["stream_ids"]) == 2
 
     [campaign] = keitaro.created_campaigns
-    assert campaign.model_dump() == {
+    # Our own alias, so a campaign whose create response is lost can be found.
+    assert campaign.alias is not None
+    assert re.fullmatch(r"[0-9a-f]{12}", campaign.alias)
+    assert body["alias"] == campaign.alias
+    assert campaign.model_dump(exclude={"alias"}) == {
         "name": "Spring promo",
         "type": "position",
         "group_id": 10332,
@@ -97,9 +102,9 @@ async def test_deletes_campaign_when_a_stream_fails(
 
     response = await client.post("/api/v1/campaigns", json=payload())
 
-    assert response.status_code == 502
+    assert response.status_code == 422
     assert response.json()["error"] == {
-        "code": "upstream_error",
+        "code": "keitaro_rejected",
         "message": "Keitaro: stream rejected",
     }
     assert keitaro.deleted_campaigns == [1001]

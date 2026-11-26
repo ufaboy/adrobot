@@ -81,6 +81,8 @@ class KeitaroStream(_KeitaroModel):
 
 class CampaignCreatePayload(_KeitaroModel):
     name: str
+    # Set by us so a campaign whose create response was lost can be found again.
+    alias: str | None = None
     type: Literal["position", "weight"] = "position"
     group_id: int
     domain_id: int

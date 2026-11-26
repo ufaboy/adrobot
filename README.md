@@ -36,6 +36,15 @@ Interactive docs: <http://localhost:8000/docs>.
 Campaign and stream ids are Keitaro ids. Every stream edit returns the recalculated stream.
 Errors use one shape: `{"error": {"code": "...", "message": "..."}}`.
 
+| Status | `code`                | Meaning                                                          |
+|--------|-----------------------|------------------------------------------------------------------|
+| 404    | `not_found`           | Unknown local stream or offer                                    |
+| 409    | `conflict`            | Another change to the same stream (or the same `Idempotency-Key`) is still running |
+| 422    | `validation_failed`   | Invalid input or a rule violation (e.g. pins above 100%)         |
+| 422    | `keitaro_rejected`    | Keitaro answered 4xx; the message is Keitaro's own               |
+| 502    | `upstream_error`      | Keitaro answered 5xx or with a response we could not parse       |
+| 503    | `keitaro_unavailable` | Keitaro could not be reached or did not answer in time           |
+
 ### How the editor works
 
 The editor keeps a **local snapshot** of a campaign's streams. Each offer row stores the
@@ -67,12 +76,34 @@ are rejected; Push is blocked while active shares do not add up to 100%. The rul
      HTTP redirect to `GOOGLE_URL`;
    - **Offers** (position 2): no filters, the selected offer with a 100% share.
 3. If any step after the campaign fails, the campaign is deleted in Keitaro (its streams go
-   with it), and the API returns `502` with Keitaro's error message.
+   with it), and the API returns the error (see the table above).
 4. The campaign is stored locally and the UI opens its editor.
+
+Creation is all-or-nothing even when Keitaro's answer is lost: every campaign is created
+with our own random `alias`, and if `POST /campaigns` times out (Keitaro may have created it
+anyway), one `GET /campaigns` looks for that alias and deletes what it finds.
 
 Offers are mirrored into the local database (refreshed when older than
 `OFFERS_CACHE_TTL_MINUTES`, or on demand), and reference lists are cached in memory, so the
 form does not hit Keitaro on every keystroke.
+
+### Slow and failing requests
+
+Every Keitaro call is visible in the reviewer's API journal, so the app avoids extra ones:
+
+- **Timeouts:** 3 s to connect to Keitaro, 10 s to wait for an answer. The frontend gives
+  up on reads after 30 s; changes are never aborted (that would leave their outcome
+  unknown) and show "Keitaro is responding slowly" after 5 s.
+- **Retries:** the backend retries a Keitaro call at most once — connection errors for any
+  method, timeouts and 502/503/504 only for `GET`/`PUT`/`DELETE`. A `POST` that may have
+  reached Keitaro is never repeated. The frontend retries a read once, only when the
+  backend itself was unreachable; error responses come with a **Retry** button instead.
+- **Duplicates:** `POST /api/v1/campaigns` accepts an `Idempotency-Key` header (the UI sends
+  one per filled-in form): a repeated key returns the first result without calling
+  Keitaro. Edits and pushes of one stream are serialized with a row lock
+  (`SELECT … FOR UPDATE NOWAIT`); a concurrent second change gets `409`. Concurrent
+  searches on an expired offer catalog trigger a single sync.
+- **Caching:** the campaign list is cached for a minute in the UI (with a **Refresh** button).
 
 ## Tech stack
 
@@ -173,4 +204,8 @@ Frontend (`frontend/.env`): `VITE_API_URL` — backend base URL, baked in at bui
 
 - No statistics: the Keitaro instance used for this assignment exposes no report endpoints.
 - No authentication: an internal tool; the Keitaro API key stays on the backend.
-- Single user: concurrent edits of the same stream are not coordinated (last write wins).
+- Single user: a second change to a stream that is being changed gets `409`; otherwise
+  the last write wins (there is no versioning of drafts between tabs).
+- Idempotency keys are kept in the backend's memory for 24 hours: they are lost on restart
+  and are not shared between processes, so the backend must run as a single uvicorn worker
+  (as it does in this repository).

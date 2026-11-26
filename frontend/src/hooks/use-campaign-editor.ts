@@ -4,8 +4,13 @@ import { api, type CampaignEditor, type Stream } from '@/lib/api'
 
 export const campaignKey = (id: number) => ['campaigns', id] as const
 
+/** Campaigns from Keitaro; cached for a minute, the list page has a Refresh button. */
 export function useCampaigns() {
-  return useQuery({ queryKey: ['campaigns', 'list'], queryFn: api.listCampaigns })
+  return useQuery({
+    queryKey: ['campaigns', 'list'],
+    queryFn: api.listCampaigns,
+    staleTime: 60 * 1000,
+  })
 }
 
 export function useCampaignEditor(id: number) {

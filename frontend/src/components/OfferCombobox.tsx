@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from '@/components/ui/command'
 import { useOfferSearch, useRefreshOffers } from '@/hooks/use-campaign-creator'
 import { useComboboxAria } from '@/hooks/use-combobox-aria'
+import { useSingleFlight } from '@/hooks/use-single-flight'
 import type { Offer } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -29,6 +30,7 @@ export function OfferCombobox({ id, value, onChange, invalid }: OfferComboboxPro
   const [query, setQuery] = useState('')
   const { result: search, settled } = useOfferSearch(query, open)
   const refresh = useRefreshOffers()
+  const refreshOnce = useSingleFlight(refresh)
   const offers = search.data ?? []
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -164,7 +166,7 @@ export function OfferCombobox({ id, value, onChange, invalid }: OfferComboboxPro
         title="Reload offers from Keitaro"
         aria-label="Reload offers from Keitaro"
         disabled={refresh.isPending}
-        onClick={() => refresh.mutate()}
+        onClick={() => refreshOnce()}
       >
         <RefreshCwIcon className={refresh.isPending ? 'animate-spin' : ''} />
       </Button>

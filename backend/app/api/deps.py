@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.db.session import get_session
 from app.integrations.keitaro import KeitaroClient
-from app.services.campaigns import CampaignService
+from app.services.campaigns import CampaignIdempotency, CampaignService
 from app.services.editor import EditorService
 from app.services.offers import OfferService
 from app.services.reference import ReferenceCache, ReferenceService
@@ -24,6 +24,11 @@ def get_keitaro_client(request: Request) -> KeitaroClient:
 def get_reference_cache(request: Request) -> ReferenceCache:
     cache: ReferenceCache = request.app.state.reference_cache
     return cache
+
+
+def get_campaign_idempotency(request: Request) -> CampaignIdempotency:
+    store: CampaignIdempotency = request.app.state.campaign_idempotency
+    return store
 
 
 KeitaroDep = Annotated[KeitaroClient, Depends(get_keitaro_client)]
@@ -53,8 +58,9 @@ def get_campaign_service(
     offers: OfferServiceDep,
     reference: ReferenceServiceDep,
     settings: SettingsDep,
+    idempotency: Annotated[CampaignIdempotency, Depends(get_campaign_idempotency)],
 ) -> CampaignService:
-    return CampaignService(session, keitaro, offers, reference, settings.google_url)
+    return CampaignService(session, keitaro, offers, reference, settings.google_url, idempotency)
 
 
 CampaignServiceDep = Annotated[CampaignService, Depends(get_campaign_service)]
