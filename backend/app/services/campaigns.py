@@ -124,9 +124,14 @@ class CampaignService:
                 Campaign(keitaro_id=campaign.id, name=campaign.name, alias=campaign.alias)
             )
             await self._session.commit()
-        except Exception:
+        except Exception as exc:
             await self._session.rollback()
-            await self._compensate(campaign.id)
+            if not await self._compensate(campaign.id) and isinstance(exc, KeitaroError):
+                raise type(exc)(
+                    f"{_reason(exc)}. Campaign {campaign.id} was created but could not be "
+                    "deleted; delete it in Keitaro",
+                    exc.upstream_status,
+                ) from exc
             raise
 
         return CampaignCreated(
@@ -184,14 +189,18 @@ class CampaignService:
             f"{_reason(error)}. Nothing was created; try again", error.upstream_status
         ) from error
 
-    async def _compensate(self, campaign_id: int) -> None:
-        """Delete a partially created campaign. Its streams are deleted with it."""
+    async def _compensate(self, campaign_id: int) -> bool:
+        """Delete a partially created campaign (its streams go with it).
+
+        Returns False if the campaign could not be deleted and is left in Keitaro.
+        """
         try:
             await self._keitaro.delete_campaign(campaign_id)
         except Exception:
             logger.exception("Failed to delete partially created campaign %s", campaign_id)
-        else:
-            logger.info("Deleted partially created campaign %s", campaign_id)
+            return False
+        logger.info("Deleted partially created campaign %s", campaign_id)
+        return True
 
 
 def _reason(error: KeitaroError) -> str:

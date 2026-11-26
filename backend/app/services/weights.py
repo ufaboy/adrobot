@@ -63,4 +63,6 @@ def push_blocker(offers: Sequence[WeightInput]) -> str | None:
     total = sum(o.share for o in active)
     if total != TOTAL_SHARE:
         return f"Shares add up to {total}%, not {TOTAL_SHARE}%. Adjust or unpin a share."
+    if any(o.share == 0 for o in active):
+        return "An active offer has a 0% share. Remove it, or lower or unpin another share."
     return None

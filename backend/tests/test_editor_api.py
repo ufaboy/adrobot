@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from httpx import AsyncClient
 
+from app.integrations.keitaro import KeitaroUnavailableError
 from app.integrations.keitaro.schemas import KeitaroOffer
 from tests.fakes import FakeKeitaroClient
 
@@ -233,3 +234,87 @@ async def test_push_without_changes_is_rejected(client: AsyncClient, stream_id: 
     response = await client.post(f"/api/v1/streams/{stream_id}/push")
 
     assert response.status_code == 409
+
+
+async def test_push_is_refused_when_the_stream_changed_in_keitaro(
+    client: AsyncClient, keitaro: FakeKeitaroClient, stream_id: int
+) -> None:
+    await client.post(f"/api/v1/streams/{stream_id}/offers/302/remove")
+    keitaro.set_offers(stream_id, [(301, 60), (302, 40)])  # someone edited it in Keitaro
+
+    response = await client.post(f"/api/v1/streams/{stream_id}/push")
+
+    assert response.status_code == 409
+    assert "changed in Keitaro" in response.json()["error"]["message"]
+    assert keitaro.pushed == []
+    stream = await client.get(f"/api/v1/campaigns/{keitaro.streams[stream_id].campaign_id}")
+    assert stream.json()["streams"][1]["dirty"] is True
+
+
+async def test_push_already_applied_in_keitaro_is_recorded_without_sending(
+    client: AsyncClient, keitaro: FakeKeitaroClient, stream_id: int
+) -> None:
+    await client.post(f"/api/v1/streams/{stream_id}/offers/302/remove")
+    # An earlier push reached Keitaro, but its response was lost.
+    keitaro.set_offers(stream_id, [(301, 50), (303, 50)])
+
+    response = await client.post(f"/api/v1/streams/{stream_id}/push")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["dirty"] is False
+    assert keitaro.pushed == []
+
+
+async def test_failed_push_keeps_the_draft(
+    client: AsyncClient, keitaro: FakeKeitaroClient, stream_id: int
+) -> None:
+    await client.post(f"/api/v1/streams/{stream_id}/offers/302/remove")
+    keitaro.update_stream_error = KeitaroUnavailableError("request timed out", maybe_applied=True)
+
+    failed = await client.post(f"/api/v1/streams/{stream_id}/push")
+
+    assert failed.status_code == 503
+    keitaro.update_stream_error = None
+    retried = await client.post(f"/api/v1/streams/{stream_id}/push")
+    assert retried.status_code == 200, retried.text
+    assert [(o.offer_id, o.share) for o in keitaro.pushed[-1][1]] == [(301, 50), (303, 50)]
+
+
+async def test_push_to_a_stream_deleted_in_keitaro_asks_to_fetch(
+    client: AsyncClient, keitaro: FakeKeitaroClient, stream_id: int
+) -> None:
+    await client.post(f"/api/v1/streams/{stream_id}/offers/302/remove")
+    del keitaro.streams[stream_id]
+
+    response = await client.post(f"/api/v1/streams/{stream_id}/push")
+
+    assert response.status_code == 409
+    assert "deleted in Keitaro" in response.json()["error"]["message"]
+
+
+async def test_offer_inactive_in_the_catalog_cannot_be_brought_back(
+    client: AsyncClient, keitaro: FakeKeitaroClient, stream_id: int
+) -> None:
+    await client.post(f"/api/v1/streams/{stream_id}/offers/302/remove")
+    keitaro.offers = [
+        o.model_copy(update={"state": "archived"}) if o.id == 302 else o for o in keitaro.offers
+    ]
+    await client.post("/api/v1/offers/refresh")
+
+    response = await client.post(f"/api/v1/streams/{stream_id}/offers/302/bring-back")
+
+    assert response.status_code == 422
+    assert "not active" in response.json()["error"]["message"]
+
+
+async def test_fetch_rejects_a_stream_listing_an_offer_twice(
+    client: AsyncClient, keitaro: FakeKeitaroClient, campaign_id: int, stream_id: int
+) -> None:
+    keitaro.set_offers(stream_id, [(301, 50), (302, 25), (301, 25)])
+
+    response = await client.post(f"/api/v1/campaigns/{campaign_id}/fetch")
+
+    assert response.status_code == 422
+    assert "offer 301 more than once" in response.json()["error"]["message"]
+    snapshot = (await client.get(f"/api/v1/campaigns/{campaign_id}")).json()
+    assert [o["offer_id"] for o in snapshot["streams"][1]["offers"]] == [301, 302, 303]

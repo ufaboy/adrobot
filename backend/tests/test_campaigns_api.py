@@ -6,6 +6,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.integrations.keitaro import KeitaroUnavailableError
 from app.models import Campaign
 from tests.fakes import FakeKeitaroClient
 
@@ -109,3 +110,18 @@ async def test_deletes_campaign_when_a_stream_fails(
     }
     assert keitaro.deleted_campaigns == [1001]
     assert (await session.scalars(select(Campaign))).all() == []
+
+
+async def test_reports_a_campaign_left_behind_when_cleanup_fails(
+    client: AsyncClient, keitaro: FakeKeitaroClient
+) -> None:
+    keitaro.fail_stream_call = 2
+    keitaro.delete_campaign_error = KeitaroUnavailableError("request timed out")
+
+    response = await client.post("/api/v1/campaigns", json=payload())
+
+    assert response.status_code == 422
+    assert response.json()["error"]["message"] == (
+        "Keitaro: Stream rejected. Campaign 1001 was created but could not be deleted; "
+        "delete it in Keitaro"
+    )

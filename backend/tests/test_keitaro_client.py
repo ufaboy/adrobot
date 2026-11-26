@@ -129,6 +129,25 @@ async def test_post_timeout_is_not_retried_and_may_be_applied(
     assert exc_info.value.status_code == 503
 
 
+@respx.mock
+async def test_reads_a_stream_with_its_offers(keitaro_client: HttpKeitaroClient) -> None:
+    respx.get(f"{BASE}/v1/streams/7").respond(
+        json={
+            "id": 7,
+            "campaign_id": 3,
+            "name": "s",
+            "type": "regular",
+            "position": 2,
+            "state": "active",
+            "offers": [{"offer_id": 5, "share": 100, "state": "active"}],
+        }
+    )
+
+    stream = await keitaro_client.get_stream(7)
+
+    assert [(o.offer_id, o.share) for o in stream.offers] == [(5, 100)]
+
+
 @pytest.mark.parametrize(
     "first",
     [httpx.ReadTimeout("slow"), httpx.Response(503, json={"error": "busy"})],

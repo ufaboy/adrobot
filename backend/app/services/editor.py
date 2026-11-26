@@ -1,9 +1,10 @@
 from datetime import UTC, datetime
 
+from fastapi import status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, ValidationFailedError
-from app.integrations.keitaro import KeitaroClient
+from app.integrations.keitaro import KeitaroClient, KeitaroRejectedError
 from app.models import Campaign, OfferState, Stream, StreamOffer
 from app.repositories.streams import EditorRepository
 from app.schemas.editor import CampaignEditorOut, CampaignSummary, StreamOfferOut, StreamOut
@@ -41,6 +42,14 @@ class EditorService:
         """Refresh the snapshot from Keitaro, discarding unpublished changes."""
         remote_campaign = await self._keitaro.get_campaign(keitaro_id)
         remote_streams = await self._keitaro.list_streams(keitaro_id)
+        for remote in remote_streams:
+            duplicates = stream_rules.duplicate_offer_ids(remote.offers)
+            if duplicates:
+                listed = ", ".join(str(i) for i in duplicates)
+                raise ValidationFailedError(
+                    f"Stream {remote.id} in Keitaro lists offer {listed} more than once; "
+                    "fix the stream in Keitaro and fetch again"
+                )
         now = datetime.now(UTC)
 
         campaign = await self._repo.get_campaign(keitaro_id)
@@ -80,11 +89,7 @@ class EditorService:
                 )
             raise ConflictError(f"Offer {offer_id} is already in this stream")
 
-        offer = await self._offers.get_fresh(offer_id)
-        if offer is None:
-            raise ValidationFailedError(f"Offer {offer_id} does not exist")
-        if offer.state != "active":
-            raise ValidationFailedError(f"Offer {offer_id} is not active")
+        await self._require_active_offer(offer_id)
 
         position = max((o.position for o in stream.offers), default=-1) + 1
         stream.offers.append(
@@ -112,6 +117,7 @@ class EditorService:
         row = self._require_offer(stream, offer_id)
         if row.state == OfferState.ACTIVE:
             raise ConflictError(f"Offer {offer_id} is already active")
+        await self._require_active_offer(offer_id)
         row.state = OfferState.ACTIVE
         return await self._rebalance_and_save(stream)
 
@@ -132,7 +138,12 @@ class EditorService:
         return await self._rebalance_and_save(stream)
 
     async def push(self, stream_id: int) -> StreamOut:
-        """Publish the stream's draft to Keitaro."""
+        """Publish the stream's draft to Keitaro.
+
+        The stream is read from Keitaro first, so a change made there since the last fetch
+        is not overwritten. If Keitaro already holds the draft (an earlier push whose
+        response was lost), the draft is recorded as published without sending it again.
+        """
         stream = await self._editable_stream(stream_id)
         if not stream.is_dirty:
             raise ConflictError("There are no unpublished changes")
@@ -140,9 +151,24 @@ class EditorService:
         if blocker is not None:
             raise ValidationFailedError(blocker)
 
-        await self._keitaro.update_stream_offers(
-            stream.keitaro_id, stream_rules.payload_offers(stream)
-        )
+        try:
+            remote_stream = await self._keitaro.get_stream(stream_id)
+        except KeitaroRejectedError as exc:
+            if exc.upstream_status != status.HTTP_404_NOT_FOUND:
+                raise
+            raise ConflictError(
+                f"Stream {stream_id} was deleted in Keitaro. Fetch streams from KT"
+            ) from exc
+        remote = stream_rules.remote_shares(remote_stream.offers)
+        if remote == stream_rules.published_shares(stream):
+            await self._keitaro.update_stream_offers(
+                stream.keitaro_id, stream_rules.payload_offers(stream)
+            )
+        elif remote != stream_rules.draft_shares(stream):
+            raise ConflictError(
+                f"Stream {stream_id} was changed in Keitaro since the last fetch. "
+                "Fetch streams from KT to see the changes; this discards your unpublished ones"
+            )
         stream_rules.mark_pushed(stream)
         await self._session.commit()
         return await self._reload_stream(stream_id)
@@ -163,6 +189,14 @@ class EditorService:
         if not stream.is_offer_stream:
             raise ValidationFailedError(f"Stream {stream_id} has no offers and is read-only")
         return stream
+
+    async def _require_active_offer(self, offer_id: int) -> None:
+        """Only offers active in the catalog may join a stream's active offers."""
+        offer = await self._offers.get_fresh(offer_id)
+        if offer is None:
+            raise ValidationFailedError(f"Offer {offer_id} does not exist")
+        if offer.state != "active":
+            raise ValidationFailedError(f"Offer {offer_id} is not active")
 
     @staticmethod
     def _require_offer(stream: Stream, offer_id: int) -> StreamOffer:

@@ -41,6 +41,8 @@ class FakeKeitaroClient:
     create_campaign_error: KeitaroError | None = None
     create_applies_before_error: bool = False
     list_campaigns_error: KeitaroError | None = None
+    update_stream_error: KeitaroError | None = None
+    delete_campaign_error: KeitaroError | None = None
 
     calls: list[str] = field(default_factory=list)
     created_campaigns: list[CampaignCreatePayload] = field(default_factory=list)
@@ -94,6 +96,8 @@ class FakeKeitaroClient:
 
     async def delete_campaign(self, campaign_id: int) -> None:
         self.calls.append("delete_campaign")
+        if self.delete_campaign_error is not None:
+            raise self.delete_campaign_error
         self.deleted_campaigns.append(campaign_id)
         self.campaigns.pop(campaign_id, None)
         self.streams = {k: v for k, v in self.streams.items() if v.campaign_id != campaign_id}
@@ -166,10 +170,18 @@ class FakeKeitaroClient:
         self.calls.append("list_streams")
         return [s for s in self.streams.values() if s.campaign_id == campaign_id]
 
+    async def get_stream(self, stream_id: int) -> KeitaroStream:
+        self.calls.append("get_stream")
+        if stream_id not in self.streams:
+            raise KeitaroRejectedError("Stream not found", 404)
+        return self.streams[stream_id]
+
     async def update_stream_offers(
         self, stream_id: int, offers: list[KeitaroStreamOffer]
     ) -> KeitaroStream:
         self.calls.append("update_stream_offers")
+        if self.update_stream_error is not None:
+            raise self.update_stream_error
         self.pushed.append((stream_id, list(offers)))
         self.streams[stream_id] = self.streams[stream_id].model_copy(update={"offers": offers})
         return self.streams[stream_id]

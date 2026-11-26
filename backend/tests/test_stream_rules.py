@@ -58,6 +58,26 @@ def test_fetch_adds_offers_new_in_keitaro_and_takes_their_shares() -> None:
     assert snapshot(stream) == [(1, "active", 70, False), (9, "active", 30, False)]
 
 
+def test_fetch_treats_offers_inactive_in_keitaro_as_removed() -> None:
+    stream = make_stream(published(1, 50), published(2, 50, position=1))
+    disabled = KeitaroStreamOffer(offer_id=2, share=50, state="disabled")
+
+    stream_rules.apply_fetched_offers(stream, [kt(1, 50), disabled])
+
+    assert snapshot(stream) == [(1, "active", 50, False), (2, "removed", 0, False)]
+    assert not stream.is_dirty
+
+
+def test_fetch_archives_an_unknown_offer_that_is_inactive_in_keitaro() -> None:
+    stream = make_stream()
+    disabled = KeitaroStreamOffer(offer_id=7, share=0, state="disabled")
+
+    stream_rules.apply_fetched_offers(stream, [disabled, kt(1, 100)])
+
+    assert snapshot(stream) == [(1, "active", 100, False), (7, "removed", 0, False)]
+    assert not stream.is_dirty
+
+
 def test_fetch_preserves_published_pins() -> None:
     stream = make_stream(published(1, 25, pinned=True), published(2, 75, position=1))
 

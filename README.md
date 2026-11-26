@@ -52,19 +52,25 @@ editable draft (`state`, `share`, `pinned`) next to the state last published to 
 A stream is **dirty** (yellow in the UI) when any draft differs from what was published.
 Nothing reaches Keitaro until **Push**.
 
-- **Fetch streams from KT** — Keitaro's offers become active with Keitaro's shares; offers
-  known locally but missing in Keitaro are archived as `removed`; published pins are kept;
+- **Fetch streams from KT** — Keitaro's active offers become active with Keitaro's shares;
+  offers known locally but missing in Keitaro, or not active there, are archived as
+  `removed`; published pins are kept;
   unpublished changes are discarded (the UI asks for confirmation first). Streams without
   offers (such as the Google redirect) are shown read-only.
 - **Add / Remove / Bring back / Pin** — change the draft and recalculate weights.
   An offer already in the stream as `removed` is brought back instead of added again.
 - **Push** — sends the active offers with their shares (`PUT /streams/{id}` with `offers`).
+  It first reads the stream (`GET /streams/{id}`): if the stream was changed in Keitaro since
+  the last fetch, Push is refused (`409`) instead of overwriting that change; if Keitaro
+  already holds the draft (an earlier Push whose response was lost), the draft is recorded
+  as published without sending it again.
 - **Cancel** — reverts the stream to the last published state; offers added since are dropped.
 
 **Weights** are integer percentages: pinned shares never change, and the rest
 (`100 − Σ pinned`) is split evenly among unpinned active offers with the largest remainder
 method (3 offers → 34/33/33; one pinned at 25% + two others → 25/38/37). Pins above 100%
-are rejected; Push is blocked while active shares do not add up to 100%. The rules live in
+are rejected; Push is blocked while active shares do not add up to 100% or an active
+offer has a 0% share. The rules live in
 `backend/app/services/weights.py` and `stream_rules.py` and are unit-tested.
 
 ### How campaign creation works

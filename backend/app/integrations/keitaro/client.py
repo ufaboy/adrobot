@@ -94,6 +94,8 @@ class KeitaroClient(Protocol):
 
     async def list_streams(self, campaign_id: int) -> list[KeitaroStream]: ...
 
+    async def get_stream(self, stream_id: int) -> KeitaroStream: ...
+
     async def update_stream_offers(
         self, stream_id: int, offers: list[KeitaroStreamOffer]
     ) -> KeitaroStream: ...
@@ -208,6 +210,9 @@ class HttpKeitaroClient:
     async def list_streams(self, campaign_id: int) -> list[KeitaroStream]:
         data = await self._request("GET", f"/campaigns/{campaign_id}/streams")
         return _parse(_streams, data)
+
+    async def get_stream(self, stream_id: int) -> KeitaroStream:
+        return _parse(_stream, await self._request("GET", f"/streams/{stream_id}"))
 
     async def update_stream_offers(
         self, stream_id: int, offers: list[KeitaroStreamOffer]

@@ -94,3 +94,10 @@ def test_push_blocked_when_all_pinned_and_sum_is_not_100() -> None:
 
 def test_push_blocked_without_active_offers() -> None:
     assert push_blocker([removed()]) == "The stream must have at least one active offer"
+
+
+def test_push_blocked_when_an_active_offer_gets_zero_share() -> None:
+    reason = push_blocker([active(60, pinned=True), active(40, pinned=True), active(0)])
+
+    assert reason is not None
+    assert "0%" in reason
