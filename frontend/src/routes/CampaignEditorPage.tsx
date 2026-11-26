@@ -1,6 +1,6 @@
 import { RefreshCwIcon } from 'lucide-react'
-import { useState } from 'react'
-import { Link, useLocation, useParams } from 'react-router'
+import { useEffect, useState } from 'react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
 
 import { StreamCard } from '@/components/editor/StreamCard'
 import { LoadError } from '@/components/LoadError'
@@ -21,7 +21,18 @@ import type { CampaignCreated } from '@/lib/api'
 
 export function CampaignEditorPage() {
   const id = Number(useParams().id)
-  const created = (useLocation().state as { created?: CampaignCreated } | null)?.created
+  const location = useLocation()
+  const navigate = useNavigate()
+  // The creator passes the new campaign in the navigation state. Keep it for this visit
+  // only: history state survives a reload, so it is cleared once read.
+  const [created] = useState(
+    () => (location.state as { created?: CampaignCreated } | null)?.created,
+  )
+  useEffect(() => {
+    if (location.state !== null) {
+      void navigate(location.pathname, { replace: true, state: null })
+    }
+  }, [location.pathname, location.state, navigate])
   const campaign = useCampaignEditor(id)
   const fetchFromKeitaro = useFetchCampaign(id)
   const fetchOnce = useSingleFlight(fetchFromKeitaro)
@@ -70,7 +81,7 @@ export function CampaignEditorPage() {
         </div>
       </div>
 
-      {created && (
+      {created?.id === id && (
         <Alert>
           <AlertTitle>Campaign “{created.name}” created</AlertTitle>
           <AlertDescription>
